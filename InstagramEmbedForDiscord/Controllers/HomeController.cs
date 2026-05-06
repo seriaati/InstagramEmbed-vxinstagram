@@ -106,6 +106,8 @@ public sealed class HomeController : Controller
 
             string instagramUrl = $"https://instagram.com/{type}/{id}/";
 
+            if (!IsBotRequest(Request.Headers.UserAgent.ToString()))
+                return Redirect(instagramUrl);
 
             bool isStoriesNoId = type.StartsWith("stories/", StringComparison.OrdinalIgnoreCase)
                                  && id.Equals(username, StringComparison.OrdinalIgnoreCase);
@@ -322,6 +324,16 @@ public sealed class HomeController : Controller
         ViewBag.Files = new List<CachedMedia> { media };
         return View("Index", new[] { contentUrl, media.ThumbnailUrl, igUrl });
     }
+
+    private static bool IsBotRequest(string ua) =>
+        ua.Contains("Discordbot", StringComparison.OrdinalIgnoreCase) ||
+        ua.Contains("TelegramBot", StringComparison.OrdinalIgnoreCase) ||
+        ua.Contains("Twitterbot", StringComparison.OrdinalIgnoreCase) ||
+        ua.Contains("facebookexternalhit", StringComparison.OrdinalIgnoreCase) ||
+        ua.Contains("Slackbot", StringComparison.OrdinalIgnoreCase) ||
+        ua.Contains("WhatsApp", StringComparison.OrdinalIgnoreCase) ||
+        ua.Contains("LinkedInBot", StringComparison.OrdinalIgnoreCase) ||
+        ua.Contains("iMessage", StringComparison.OrdinalIgnoreCase);
 
     private IActionResult RenderMultiple(List<CachedMedia> media, string igUrl, string cacheId,
         CachedPost post, int orderIndex)
