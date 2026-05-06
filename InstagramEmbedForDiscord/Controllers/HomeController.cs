@@ -40,7 +40,7 @@ public sealed class HomeController : Controller
 
 
     [Route("/")]
-    public IActionResult HomePage() => View();
+    public IActionResult HomePage() => Redirect("https://github.com/Lainmode/InstagramEmbed-vxinstagram");
 
     [Route("/setdonationvariables")]
     [HttpGet]
