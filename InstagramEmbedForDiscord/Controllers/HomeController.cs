@@ -97,6 +97,44 @@ public sealed class HomeController : Controller
 
 
     /// <summary>
+    /// Machine-readable listing of every media item in a post, in post order.
+    /// GET /api/media?url=https://www.instagram.com/p/XXXX/
+    /// </summary>
+    [Route("/api/media")]
+    [HttpGet]
+    public async Task<IActionResult> ApiMedia([FromQuery] string? url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || !(uri.Host.Equals("instagram.com", StringComparison.OrdinalIgnoreCase)
+                 || uri.Host.EndsWith(".instagram.com", StringComparison.OrdinalIgnoreCase))
+            || string.IsNullOrWhiteSpace(uri.AbsolutePath.Trim('/')))
+        {
+            return BadRequest(new { error = "Missing or invalid 'url' query parameter; expected an absolute Instagram URL." });
+        }
+
+        var (instagramUrl, cacheId, _, _) = ParsePath(uri.AbsolutePath, null);
+
+        var post = await _posts.GetOrFetchAsync(cacheId, instagramUrl);
+        if (post == null || post.Media.Count == 0)
+            return NotFound(new { error = "Post could not be fetched." });
+
+        string host = $"https://{Request.Host}";
+        string escapedId = Uri.EscapeDataString(cacheId);
+
+        var media = post.Media
+            .Select((m, i) => new
+            {
+                type = m.MediaType,
+                // videos use the .mp4 route variant so clients can derive the extension from the path
+                url = $"{host}/offload/{escapedId}/{i}{(m.MediaType == "video" ? ".mp4" : "")}"
+            })
+            .ToList();
+
+        return Ok(new { media });
+    }
+
+    /// <summary>
     /// Shared path parsing for Index() and ApiMedia(): turns an Instagram path such as
     /// "p/XXXX", "reel/XXXX", "user/p/XXXX", "stories/user/123" or "share/reel/XXXX"
     /// (optionally with a trailing 1-based item number) into the canonical Instagram URL
