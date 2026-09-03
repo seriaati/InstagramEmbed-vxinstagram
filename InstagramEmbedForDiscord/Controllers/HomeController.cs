@@ -71,50 +71,12 @@ public sealed class HomeController : Controller
             if (string.IsNullOrWhiteSpace(path))
                 return BadRequest("Invalid Instagram path.");
 
-            var segments = path.Trim('/').Split('/');
-
-            int orderIndex = 0;
-            bool orderSpecified = false;
-
-            if (int.TryParse(segments.Last(), out int parsed))
-            {
-                orderIndex = Math.Max(0, parsed - 1);
-                segments = segments.Take(segments.Length - 1).ToArray();
-                orderSpecified = true;
-            }
-            else if (imgIndex.HasValue)
-            {
-                orderIndex = Math.Max(0, imgIndex.Value);
-                orderSpecified = true;
-            }
-
-            string id = segments.Last();
-            string type = segments.Length > 1 ? segments[^2] : segments[0];
-            string? username = segments.Length > 2 ? segments[0] : null;
+            var (instagramUrl, cacheId, orderIndex, orderSpecified) = ParsePath(path, imgIndex);
 
             ViewBag.Order = orderIndex;
 
-            if (username?.Equals("stories", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                username = type;                   // the actual username segment
-                type = $"stories/{username}";
-            }
-            else if (username?.Equals("share", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                type = $"share/{type}";
-            }
-
-            string instagramUrl = $"https://instagram.com/{type}/{id}/";
-
             if (!IsBotRequest(Request.Headers.UserAgent.ToString()))
                 return Redirect(instagramUrl);
-
-            bool isStoriesNoId = type.StartsWith("stories/", StringComparison.OrdinalIgnoreCase)
-                                 && id.Equals(username, StringComparison.OrdinalIgnoreCase);
-
-            string cacheId = isStoriesNoId
-                ? Uri.EscapeDataString(instagramUrl)
-                : id;
 
             ViewBag.PostId = cacheId;
             ViewBag.MaybeDonate = _donate.MaybeGetDonateMessage();
@@ -133,6 +95,58 @@ public sealed class HomeController : Controller
     }
 
 
+
+    /// <summary>
+    /// Shared path parsing for Index() and ApiMedia(): turns an Instagram path such as
+    /// "p/XXXX", "reel/XXXX", "user/p/XXXX", "stories/user/123" or "share/reel/XXXX"
+    /// (optionally with a trailing 1-based item number) into the canonical Instagram URL
+    /// and the cache key used by PostCacheService and the /offload routes.
+    /// </summary>
+    private static (string InstagramUrl, string CacheId, int OrderIndex, bool OrderSpecified)
+        ParsePath(string path, int? imgIndex)
+    {
+        var segments = path.Trim('/').Split('/');
+
+        int orderIndex = 0;
+        bool orderSpecified = false;
+
+        if (int.TryParse(segments.Last(), out int parsed))
+        {
+            orderIndex = Math.Max(0, parsed - 1);
+            segments = segments.Take(segments.Length - 1).ToArray();
+            orderSpecified = true;
+        }
+        else if (imgIndex.HasValue)
+        {
+            orderIndex = Math.Max(0, imgIndex.Value);
+            orderSpecified = true;
+        }
+
+        string id = segments.Last();
+        string type = segments.Length > 1 ? segments[^2] : segments[0];
+        string? username = segments.Length > 2 ? segments[0] : null;
+
+        if (username?.Equals("stories", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            username = type;                   // the actual username segment
+            type = $"stories/{username}";
+        }
+        else if (username?.Equals("share", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            type = $"share/{type}";
+        }
+
+        string instagramUrl = $"https://instagram.com/{type}/{id}/";
+
+        bool isStoriesNoId = type.StartsWith("stories/", StringComparison.OrdinalIgnoreCase)
+                             && id.Equals(username, StringComparison.OrdinalIgnoreCase);
+
+        string cacheId = isStoriesNoId
+            ? Uri.EscapeDataString(instagramUrl)
+            : id;
+
+        return (instagramUrl, cacheId, orderIndex, orderSpecified);
+    }
 
     [Route("/offload/{id}")]
     [Route("/offload/{id}.mp4")]
