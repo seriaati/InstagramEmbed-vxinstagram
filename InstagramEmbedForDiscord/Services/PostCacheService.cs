@@ -1,4 +1,6 @@
-﻿using System.Text.Json;
+﻿using System.Net;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using InstagramEmbed.Application.Models;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -12,6 +14,7 @@ public sealed class PostCacheService
 {
     private readonly IMemoryCache _cache;
     private readonly HttpClient _http;
+    private readonly HttpClient _metaHttp;
     private readonly ILogger<PostCacheService> _logger;
     private readonly string _snapSaveBase;
 
@@ -22,6 +25,7 @@ public sealed class PostCacheService
     {
         _cache = cache;
         _http = factory.CreateClient("snapsave");
+        _metaHttp = factory.CreateClient("igmeta");
         _logger = logger;
         var port = config.GetValue<int>("SnapSave:Port", 3200);
         _snapSaveBase = $"http://localhost:{port}";
@@ -32,8 +36,12 @@ public sealed class PostCacheService
         if (_cache.TryGetValue(cacheId, out CachedPost? cached))
             return cached;
 
+        var pageTask = FetchPostPageAsync(instagramUrl);
         var post = await FetchFromSnapSaveAsync(cacheId, instagramUrl);
         if (post == null) return null;
+
+        var page = await pageTask;
+        if (page != null) ApplyOpenGraph(post, page);
 
         _cache.Set(cacheId, post, new MemoryCacheEntryOptions
         {
@@ -89,5 +97,62 @@ public sealed class PostCacheService
             _logger.LogError(ex, "Failed to fetch {Url} from snapsave {json}", instagramUrl, json);
             return null;
         }
+    }
+
+    // Instagram serves Open Graph tags (author + full caption) to link-preview crawlers without a login.
+    private static readonly Regex OgTagRegex = new(
+        "<meta\\s+property=\"og:(title|url|description)\"\\s+content=\"([^\"]*)\"", RegexOptions.Compiled);
+
+    // og:title = `{name} on Instagram: "{caption}"`
+    private static readonly Regex OgTitleRegex = new(
+        "^(.+?) on Instagram(?:: \"(.*)\")?$", RegexOptions.Compiled | RegexOptions.Singleline);
+
+    // og:description = `{likes}, {comments} - {username} on {date}: "{caption}"`
+    private static readonly Regex OgDescriptionRegex = new(
+        " - ([A-Za-z0-9._]+) on [^:]+(?:: \"(.*)\")?$", RegexOptions.Compiled | RegexOptions.Singleline);
+
+    private async Task<string?> FetchPostPageAsync(string instagramUrl)
+    {
+        try
+        {
+            return await _metaHttp.GetStringAsync(instagramUrl);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to fetch post page for {Url}", instagramUrl);
+            return null;
+        }
+    }
+
+    private static void ApplyOpenGraph(CachedPost post, string html)
+    {
+        var og = new Dictionary<string, string>();
+        foreach (Match m in OgTagRegex.Matches(html))
+            og.TryAdd(m.Groups[1].Value, WebUtility.HtmlDecode(m.Groups[2].Value));
+
+        var title = og.TryGetValue("title", out var t) ? OgTitleRegex.Match(t) : Match.Empty;
+        var description = og.TryGetValue("description", out var d) ? OgDescriptionRegex.Match(d) : Match.Empty;
+
+        if (title.Success)
+            post.AuthorName = title.Groups[1].Value;
+
+        string? caption = title.Groups[2].Success ? title.Groups[2].Value
+            : description.Groups[2].Success ? description.Groups[2].Value
+            : null;
+        if (!string.IsNullOrWhiteSpace(caption))
+            post.Caption = caption;
+
+        string? username = og.TryGetValue("url", out var url) ? UsernameFromPostUrl(url) : null;
+        username ??= description.Success ? description.Groups[1].Value : null;
+        if (username != null)
+            post.AuthorUsername = username;
+    }
+
+    // og:url = https://www.instagram.com/{username}/p/{shortcode}/ (or /reel/, /tv/)
+    private static string? UsernameFromPostUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return null;
+        var segments = uri.AbsolutePath.Trim('/').Split('/');
+        return segments.Length >= 3 && segments[1] is "p" or "reel" or "tv" ? segments[0] : null;
     }
 }

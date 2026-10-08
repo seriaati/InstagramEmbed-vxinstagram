@@ -26,6 +26,12 @@ builder.Services.AddHttpClient("snapsave", c =>
     c.Timeout = TimeSpan.FromSeconds(20);
 });
 
+builder.Services.AddHttpClient("igmeta", c =>
+{
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("facebookexternalhit/1.1");
+    c.Timeout = TimeSpan.FromSeconds(5);
+});
+
 builder.Services.AddSingleton<PostCacheService>();
 builder.Services.AddSingleton<DonateMessageService>();
 
