@@ -131,7 +131,11 @@ public sealed class HomeController : Controller
             })
             .ToList();
 
-        return Ok(new { media });
+        var author = post.AuthorUsername == "NOT_SET"
+            ? null
+            : new { username = post.AuthorUsername, name = post.AuthorName };
+
+        return Ok(new { media, caption = post.Caption, author });
     }
 
     /// <summary>
